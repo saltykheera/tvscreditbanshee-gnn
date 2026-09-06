@@ -130,3 +130,12 @@ dmypy.json
 *.csv
 *.pkl
 *.pth
+
+ARCHITECTURE_SWARM_LENDING.md
+BACKEND_AND_API_GUIDE.md 
+graph_intro.png
+README_past.md
+generate_presentation.py
+generate_tvs_dummy_data.py
+TVS_Credit_EPIC8_Swarm_Intelligence_Lending_Network.pptx
+

@@ -14,7 +14,7 @@ def parse_args():
     parser.add_argument('--model-dir', type=str, default='./model/'+dt)
     parser.add_argument('--output-dir', type=str, default='./output')
     parser.add_argument('--nodes', type=str, default='features.csv')
-    parser.add_argument('--target-ntype', type=str, default='TransactionID')
+    parser.add_argument('--target-ntype', type=str, default='application_id')
     parser.add_argument('--edges', type=str, default='relation*')
     parser.add_argument('--labels', type=str, default='tags.csv')
     parser.add_argument('--new-accounts', type=str, default='test.csv')

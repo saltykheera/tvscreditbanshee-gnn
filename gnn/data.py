@@ -10,19 +10,22 @@ def get_features(id_to_node, node_features):
     :return: (np.ndarray, list) node feature matrix in order and new nodes not yet in the graph
     """
     indices, features, new_nodes = [], [], []
-    max_node = max(id_to_node.values())
+    max_node = max(id_to_node.values()) if len(id_to_node) > 0 else -1
 
-    is_1st_line = True
     with open(node_features, "r") as fh:
         for line in fh:
-            # hard-coding to ignore the 1st line of header
-            # if is_1st_line:
-            #     is_1st_line = False
-            #     continue
+            line_str = line.strip()
+            if not line_str:
+                continue
+            node_feats = [col.strip() for col in line_str.split(",")]
+            node_id = str(node_feats[0])
+            
+            # Check if second column is numeric; if not, skip header row
+            try:
+                feats = np.array(list(map(float, node_feats[1:])))
+            except ValueError:
+                continue
 
-            node_feats = line.strip().split(",")
-            node_id = node_feats[0]
-            feats = np.array(list(map(float, node_feats[1:])))
             features.append(feats)
             if node_id not in id_to_node:
                 max_node += 1
@@ -48,8 +51,13 @@ def get_labels(id_to_node, n_nodes, target_node_type, labels_path, masked_nodes_
     :return: (list, list) train and test mask array
     """
     node_to_id = {v: k for k, v in id_to_node.items()}
-    user_to_label = pd.read_csv(labels_path).set_index(target_node_type)
-    labels = user_to_label.loc[map(int, pd.Series(node_to_id)[np.arange(n_nodes)].values)].values.flatten()
+    user_to_label = pd.read_csv(labels_path)
+    user_to_label[target_node_type] = user_to_label[target_node_type].astype(str).str.strip()
+    user_to_label = user_to_label.set_index(target_node_type)
+    
+    # Safely look up IDs supporting string/alphanumeric IDs
+    ordered_ids = [str(node_to_id[i]).strip() for i in range(n_nodes)]
+    labels = user_to_label.loc[ordered_ids].values.flatten()
     masked_nodes = read_masked_nodes(masked_nodes_path)
     train_mask, test_mask = _get_mask(id_to_node, node_to_id, n_nodes, masked_nodes,
                                       additional_mask_rate=additional_mask_rate)
@@ -63,8 +71,11 @@ def read_masked_nodes(masked_nodes_path):
     :param masked_nodes_path: filepath containing list of nodes to be masked i.e test users
     :return: list
     """
+    import os
+    if not os.path.exists(masked_nodes_path):
+        return []
     with open(masked_nodes_path, "r") as fh:
-        masked_nodes = [line.strip() for line in fh]
+        masked_nodes = [str(line).strip() for line in fh if line.strip()]
     return masked_nodes
 
 
@@ -82,10 +93,12 @@ def _get_mask(id_to_node, node_to_id, num_nodes, masked_nodes, additional_mask_r
     train_mask = np.ones(num_nodes)
     test_mask = np.zeros(num_nodes)
     for node_id in masked_nodes:
-        train_mask[id_to_node[node_id]] = 0
-        test_mask[id_to_node[node_id]] = 1
+        node_id_str = str(node_id).strip()
+        if node_id_str in id_to_node:
+            train_mask[id_to_node[node_id_str]] = 0
+            test_mask[id_to_node[node_id_str]] = 1
     if additional_mask_rate and additional_mask_rate < 1:
-        unmasked = np.array([idx for idx in range(num_nodes) if node_to_id[idx] not in masked_nodes])
+        unmasked = np.array([idx for idx in range(num_nodes) if str(node_to_id[idx]).strip() not in masked_nodes])
         yet_unmasked = np.random.permutation(unmasked)[:int(additional_mask_rate*num_nodes)]
         train_mask[yet_unmasked] = 0
     return train_mask, test_mask
@@ -123,7 +136,13 @@ def parse_edgelist(edges, id_to_node, header=False, source_type='user', sink_typ
     source_pointer, sink_pointer = 0, 0
     with open(edges, "r") as fh:
         for i, line in enumerate(fh):
-            source, sink = line.strip().split(",")
+            line_str = line.strip()
+            if not line_str:
+                continue
+            tokens = [token.strip() for token in line_str.split(",")]
+            if len(tokens) < 2:
+                continue
+            source, sink = tokens[0], tokens[1]
             if i == 0:
                 if header:
                     source_type, sink_type = source, sink

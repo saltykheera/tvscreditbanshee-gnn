@@ -128,6 +128,60 @@ def get_model_class_predictions(model, g, features, labels, device, threshold=No
     return np.where(pred_proba.detach().numpy() > threshold, 1, 0), pred_proba[:,1].detach().numpy()
 
 
+def detect_fraud_ecosystems(model, g, features, target_id_to_node, output_dir, device, threshold=0.75):
+    """
+    Groups applications into communities using learned GNN embeddings
+    to detect organized syndicate rings / ecosystems before default occurs.
+    """
+    import torch.nn.functional as F
+    model.eval()
+    with th.no_grad():
+        h_dict = {ntype: emb for ntype, emb in model.embed.items()}
+        h_dict['target'] = features.to(device)
+        for i, layer in enumerate(model.layers[:-1]):
+            if i != 0:
+                h_dict = {k: F.leaky_relu(h) for k, h in h_dict.items()}
+            h_dict = layer(g, h_dict)
+        app_embeddings = h_dict['target'].cpu().numpy()
+
+    idx_to_target = {v: k for k, v in target_id_to_node.items()}
+    n_samples = len(app_embeddings)
+
+    # Compute cosine similarity
+    norms = np.linalg.norm(app_embeddings, axis=1, keepdims=True) + 1e-8
+    normed_emb = app_embeddings / norms
+    cos_sim = np.dot(normed_emb, normed_emb.T)
+
+    # Connected components clustering for syndicate rings
+    adj_matrix = (cos_sim >= threshold).astype(int)
+    visited = set()
+    clusters = [-1] * n_samples
+    cluster_id = 0
+
+    for i in range(n_samples):
+        if i not in visited:
+            connected = [j for j in range(n_samples) if adj_matrix[i, j] == 1]
+            if len(connected) > 1:
+                for node in connected:
+                    visited.add(node)
+                    clusters[node] = cluster_id
+                cluster_id += 1
+            else:
+                visited.add(i)
+
+    cluster_df = pd.DataFrame({
+        'application_id': [idx_to_target[i] for i in range(n_samples)],
+        'ecosystem_cluster_id': clusters
+    })
+    
+    os.makedirs(output_dir, exist_ok=True)
+    ecosystem_path = os.path.join(output_dir, 'fraud_ecosystems.csv')
+    cluster_df.to_csv(ecosystem_path, index=False)
+    n_rings = len([c for c in set(clusters) if c != -1])
+    print("Detected {} emerging syndicate ecosystems/rings. Saved to {}".format(n_rings, ecosystem_path))
+    return cluster_df
+
+
 def save_model(g, model, model_dir, id_to_node, mean, stdev):
 
     # Save Pytorch model's parameters to model.pth
@@ -260,7 +314,16 @@ if __name__ == '__main__':
     labels = labels.long().to(device)
     test_mask = test_mask.to(device)
 
-    loss = th.nn.CrossEntropyLoss()
+    # Balanced loss for imbalanced fraud classification (common in retail lending)
+    pos_count = (labels == 1).sum().item()
+    neg_count = (labels == 0).sum().item()
+    if pos_count > 0 and neg_count > 0:
+        pos_weight = float(neg_count) / float(pos_count)
+        weights = th.tensor([1.0, min(pos_weight, 50.0)], device=device).float()
+        loss = th.nn.CrossEntropyLoss(weight=weights)
+        print("Using class-weighted CrossEntropyLoss (pos_weight: {:.2f})".format(weights[1].item()))
+    else:
+        loss = th.nn.CrossEntropyLoss()
 
     # print(model)
     optim = th.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -271,6 +334,9 @@ if __name__ == '__main__':
                                               test_mask, device, args.n_epochs,
                                               args.threshold,  args.compute_metrics)
     print("Finished Model training")
+
+    print("Detecting Emerging Fraud Ecosystems / Syndicate Rings...")
+    detect_fraud_ecosystems(model, g, features, target_id_to_node, args.output_dir, device)
 
     print("Saving model")
     if not os.path.exists(args.model_dir):
