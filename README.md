@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./artifacts/tvscredit_assests/architecture_network.png" alt="TVS Credit Banshee - Swarm Intelligence Architecture" width="100%" />
+  <img src="./artifacts/tvscredit_assests/architecture.svg" alt="TVS Credit Banshee - Swarm Intelligence Architecture" width="100%" />
 </p>
 
 <h1 align="center">TVS Credit Banshee</h1>
